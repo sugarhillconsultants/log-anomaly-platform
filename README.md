@@ -62,3 +62,4 @@ actually breaks, the same way those two were debugged.
 - A GitHub Actions job that automatically bumps `MODEL_REVISION` in
   `main.py` when Project 2's pipeline registers a new tagged version,
   closing the loop between the two repos entirely.
+
