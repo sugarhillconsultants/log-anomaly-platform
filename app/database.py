@@ -31,6 +31,13 @@ class LogEventRecord(Base):
     confidence: Mapped[float] = mapped_column(Float)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
+    @property
+    def event_id(self) -> int:
+        """Bridges this table's 'id' primary key to the API response
+        model's 'event_id' field name, so from_attributes-based
+        serialization in main.py's LogEventOut can find it via getattr."""
+        return self.id
+
 
 async def init_db():
     async with engine.begin() as conn:
