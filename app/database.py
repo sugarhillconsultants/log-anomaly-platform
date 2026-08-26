@@ -38,6 +38,13 @@ class LogEventRecord(Base):
         serialization in main.py's LogEventOut can find it via getattr."""
         return self.id
 
+    @property
+    def event_id(self) -> int:
+        """Bridges this table's 'id' primary key to the API response
+        model's 'event_id' field name, so from_attributes-based
+        serialization in main.py's LogEventOut can find it via getattr."""
+        return self.id
+
 
 async def init_db():
     async with engine.begin() as conn:
