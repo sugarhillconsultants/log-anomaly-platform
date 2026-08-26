@@ -69,28 +69,24 @@ jobs:
       # Azure Container Apps limits a full revision name (app name + "--" +
       # suffix) to 54 characters. A full 40-char git SHA pushes this app's
       # name ("ca-log-anomaly", 14 chars) over that limit by 2 characters —
-      # use a short (8-char) SHA instead, computed once and reused so the
-      # canary script below targets the exact same revision this step creates.
+      # use a short (8-char) SHA instead.
       - id: short_sha
         run: echo "value=$(echo ${{ github.sha }} | cut -c1-8)" >> "$GITHUB_OUTPUT"
 
-      # First, deploy the new revision with a suffix derived from the commit SHA
-      - name: Deploy new revision
-        run: |
-          az containerapp update --name ${{ vars.CONTAINER_APP_NAME }} \
-            --resource-group ${{ vars.RESOURCE_GROUP }} \
-            --image ${{ needs.build-and-push.outputs.image_tag }} \
-            --revision-suffix ${{ steps.short_sha.outputs.value }}
-
-      # Then run the REAL canary rollout — progressive traffic shift,
-      # gated on a live Application Insights failure-rate query, with
-      # automatic rollback if the new revision misbehaves. This is the
-      # piece Project 3 left as a documented stub; here it's wired for real.
-      - name: Canary rollout with live failure-rate gating
+      # Deployment now happens INSIDE canary_rollback.py, not as a separate
+      # step here. This app's ingress uses a `latestRevision: true` traffic
+      # rule, which auto-promotes any newly created revision to 100% traffic
+      # immediately — regardless of active revisions mode. The only way to
+      # correctly capture the previous "last good" revision is to query it
+      # BEFORE deploying, which requires the deploy and the query to happen
+      # in the same process, in a guaranteed order. See canary_rollback.py's
+      # run_canary() for the full explanation.
+      - name: Deploy + canary rollout with live failure-rate gating
         run: |
           python deploy/canary_rollback.py \
             --app-name ${{ vars.CONTAINER_APP_NAME }} \
             --resource-group ${{ vars.RESOURCE_GROUP }} \
+            --image ${{ needs.build-and-push.outputs.image_tag }} \
             --new-revision-suffix ${{ steps.short_sha.outputs.value }} \
             --app-insights-app-id ${{ vars.LOG_ANALYTICS_WORKSPACE_ID }} \
             --failure-threshold-pct 5.0
