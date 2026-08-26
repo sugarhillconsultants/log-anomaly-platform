@@ -18,7 +18,14 @@ with patch("main.get_classifier") as mock_get_classifier:
     ]
     from main import app
 
-client = TestClient(app)
+# IMPORTANT: TestClient only runs the app's lifespan handler (which calls
+# init_db() to create the SQLite table) when used as a context manager.
+# A plain `TestClient(app)` never triggers startup/shutdown events, which
+# causes "no such table: log_events" on every DB-touching test. Entering
+# the context manager once here, at module scope, keeps it open for the
+# whole test session.
+_client_ctx = TestClient(app)
+client = _client_ctx.__enter__()
 
 
 def get_auth_token():
