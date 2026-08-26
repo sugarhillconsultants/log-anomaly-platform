@@ -34,10 +34,15 @@ def run_az(args: list[str]) -> str:
 
 
 def get_last_good_revision(app_name: str, resource_group: str) -> str:
+    """Picks the highest-traffic existing revision, rather than requiring
+    exactly 100%. A previously interrupted rollout can leave traffic
+    split across two revisions with neither at exactly 100% — requiring
+    an exact match would return nothing in that state, producing a
+    malformed downstream command."""
     return run_az([
         "containerapp", "revision", "list",
         "--name", app_name, "--resource-group", resource_group,
-        "--query", "[?properties.trafficWeight==`100`].name | [0]",
+        "--query", "reverse(sort_by(@, &properties.trafficWeight))[0].name",
         "-o", "tsv",
     ])
 
@@ -135,6 +140,15 @@ def run_canary(app_name: str, resource_group: str, image: str, new_revision_suff
     # the first two live runs of this script).
     good_revision = get_last_good_revision(app_name, resource_group)
     print(f"Last known-good revision (captured before deploying): {good_revision}")
+
+    if not good_revision:
+        print("ERROR: no existing revision found to preserve as a fallback. "
+              "This is expected on a genuinely first-ever deployment (nothing to "
+              "canary against yet) — in that case, deploy directly with "
+              "`az containerapp update` instead of this script. If a revision "
+              "should exist and this is unexpected, check "
+              "`az containerapp revision list` manually before retrying.")
+        sys.exit(1)
 
     print(f"Deploying new revision {new_revision}...")
     deploy_new_revision(app_name, resource_group, image, new_revision_suffix)
