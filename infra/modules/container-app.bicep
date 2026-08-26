@@ -41,6 +41,13 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
   properties: {
     managedEnvironmentId: containerAppEnv.id
     configuration: {
+      // Required for deploy/canary_rollback.py to work at all: in the
+      // default 'Single' mode, any newly deployed revision is
+      // automatically promoted to 100% traffic immediately, making a
+      // genuine canary split architecturally impossible. 'Multiple'
+      // mode allows two revisions to coexist with independently
+      // controlled traffic weights.
+      activeRevisionsMode: 'Multiple'
       ingress: {
         external: true
         targetPort: 7860
