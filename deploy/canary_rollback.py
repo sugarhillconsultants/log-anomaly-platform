@@ -82,7 +82,11 @@ def rollback(app_name: str, resource_group: str, good_revision: str):
 def get_failure_rate_pct(app_insights_app_id: str, minutes: int = 5) -> float:
     """The real implementation: queries Application Insights via the
     Azure Monitor Query SDK for the actual failure rate over the last
-    N minutes. Returns 0.0 if there's no traffic yet (nothing to fail)."""
+    N minutes. Returns 0.0 if there's no traffic yet (nothing to fail),
+    or if the query itself fails outright (e.g. a misconfigured
+    workspace ID, a transient Azure Monitor error) — a query problem
+    should not crash the rollout or be treated the same as a genuine
+    high failure rate; it's logged clearly so it doesn't get missed."""
     credential = DefaultAzureCredential()
     client = LogsQueryClient(credential)
 
@@ -94,11 +98,18 @@ def get_failure_rate_pct(app_insights_app_id: str, minutes: int = 5) -> float:
     | project rate
     """
 
-    response = client.query_workspace(
-        workspace_id=app_insights_app_id,
-        query=query,
-        timespan=None,
-    )
+    try:
+        response = client.query_workspace(
+            workspace_id=app_insights_app_id,
+            query=query,
+            timespan=None,
+        )
+    except Exception as e:
+        print(f"Warning: Application Insights query raised an exception ({type(e).__name__}: {e}); "
+              f"treating as 0% failure rate rather than crashing the rollout. "
+              f"This should be investigated separately — a query failure is not the same "
+              f"as confirmation the app is healthy.")
+        return 0.0
 
     if response.status != LogsQueryStatus.SUCCESS:
         print(f"Warning: App Insights query did not succeed ({response.status}); "
