@@ -149,3 +149,41 @@ async def create_event(
     background_tasks.add_task(send_alert_if_anomalous, record.id, label, confidence)
 
     return record
+
+
+class RecentFeaturesOut(BaseModel):
+    """The real numeric signals available for drift detection against a
+    TEXT classifier — confidence and text length. This intentionally
+    replaces an earlier, incorrect assumption (in the observability
+    project's original baseline builder) that this model used tabular
+    features like `is_off_hours` — it doesn't; those belonged to a
+    different project's simpler sklearn model, not this fine-tuned
+    text classifier. Confidence and text length are what's actually
+    available here, so those are what drift gets measured on."""
+    n: int
+    confidence: list[float]
+    text_length: list[int]
+    predicted_labels: list[str]
+
+
+@app.get("/events/recent-features", response_model=RecentFeaturesOut)
+async def get_recent_features(
+    limit: int = 500,
+    db: AsyncSession = Depends(get_db),
+    current_user: str = Depends(get_current_user),
+):
+    """Feeds Project 4 (Model Observability Dashboard)'s drift detection
+    with real production data — confidence scores and text lengths from
+    the most recent classified events, in place of the hardcoded
+    psi_score=0.0 placeholder that project's workflow originally used."""
+    result = await db.execute(
+        select(LogEventRecord).order_by(LogEventRecord.created_at.desc()).limit(limit)
+    )
+    records = result.scalars().all()
+
+    return RecentFeaturesOut(
+        n=len(records),
+        confidence=[r.confidence for r in records],
+        text_length=[len(r.text) for r in records],
+        predicted_labels=[r.predicted_label for r in records],
+    )
