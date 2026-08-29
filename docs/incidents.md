@@ -198,6 +198,52 @@ live Application Insights query succeeds → continue to 50% → 100%,
 against real Azure infrastructure, for the first time in this
 project's history.
 
+## 10. A new endpoint added for Project 4, broken by classic FastAPI route ordering
+
+Adding `GET /events/recent-features` (to feed
+[Model Observability Dashboard](https://github.com/sugarhillconsultants/model-observability-dashboard)'s
+drift detection with real data) initially failed with:
+`{"detail":[{"type":"int_parsing","loc":["path","event_id"],"msg":"Input
+should be a valid integer, unable to parse string as an integer",
+"input":"recent-features"}]}`. The cause: FastAPI/Starlette match
+routes in the order they're defined in the file, and `/events/{event_id}`
+was defined *before* `/events/recent-features`. Since the literal string
+`"recent-features"` syntactically matches the `{event_id}` pattern (any
+string in that position), every request to the new endpoint was being
+routed to `get_event()` first, which then failed trying to parse
+`"recent-features"` as an integer. This is a well-known FastAPI pitfall
+in general — specific, literal paths must be declared before catch-all
+path-parameter routes on the same prefix, or the parameterized route
+will greedily match first — caught here the same way as everything else
+in this log: by actually calling the endpoint and reading the exact
+error, then confirming the fix with a route-matching simulation before
+redeploying. Fixed by moving the new route (and its response model)
+to appear before `/events/{event_id}` in the file.
+
+## 11. A real, honest architectural limitation surfaced by this work: event history doesn't survive a redeploy
+
+Immediately after the route fix deployed, `/events/recent-features`
+correctly returned `{"n":0,...}` — a valid, well-formed empty response,
+not a bug. The reason: `DATABASE_URL` defaults to a local SQLite file
+inside the container's own filesystem
+(`sqlite+aiosqlite:///./log_events.db`), which does not persist across
+container restarts or redeployments. Every rebuild/redeploy this
+session (the `bcrypt` fix, the `event_id` fix, the route fix, each
+canary rollout creating a fresh revision) started that revision with an
+empty database — the two events classified during earlier manual
+testing existed only in whatever specific revision was running at that
+time. Confirmed by creating two fresh events and immediately querying
+again, which correctly returned both. This isn't something to fix
+reactively — it's a genuine, worth-stating-plainly architectural
+constraint of using SQLite-on-container-disk for a service that gets
+redeployed as often as this one has been throughout this portfolio's
+development: Project 4's drift detection will only ever see traffic
+accumulated since the *last* deploy, not a long historical baseline.
+Closing this properly would mean moving to a persistent database (e.g.
+Azure Database for PostgreSQL) — a real, larger change, not something
+to paper over by pretending the current setup already has durable
+history.
+
 ## After all fixes: a genuine, verified end-to-end pass
 
 ```
@@ -212,14 +258,20 @@ GitHub Actions: test -> build-and-push -> deploy-container-apps-canary
   (full 10% -> 50% -> 100% ramp, gated on a live App Insights query)
   -> deploy-huggingface-space
 ALL JOBS PASSING
+
+GET /events/recent-features (with auth), after route-order fix
+  → {"n":2,"confidence":[0.737,0.619],"text_length":[47,54],
+     "predicted_labels":["normal","security_anomaly"]}
 ```
 
 Auth is genuinely enforced, the actual fine-tuned model from Project 2
 is genuinely loaded and classifying correctly in both directions,
-persistence genuinely round-trips, and — as of incident #9 — the
-canary rollout this whole project was built to demonstrate is
-genuinely working against live infrastructure, not just documented as
-a script that theoretically implements one.
+persistence genuinely round-trips (within a single deployment's
+lifetime — see incident #11), the canary rollout this whole project was
+built to demonstrate is genuinely working against live infrastructure,
+and — as of incident #10 — this project now genuinely feeds real
+production data to Project 4's drift detection, closing a real
+cross-project loop rather than leaving it as a documented intention.
 
 ## The throughline across all three projects' incident logs
 
@@ -228,14 +280,18 @@ a script that theoretically implements one.
 - **Project 2**: Python/ML-tooling-shaped bugs (namespace collisions,
   tokenizer conversion edge cases, dependency resolver behavior).
 - **Project 1 (this one)**: a genuine spread across *all* of the above,
-  plus two categories no other project in this portfolio hit: a real
+  plus categories no other project in this portfolio hit: a real
   application-logic bug (#4), a deployment-mechanics trap specific to
   Container Apps' revision model (#5), a pure process gap between
-  "verified working" and "actually committed" (#7), and — the deepest
-  of all — a persistent platform-level traffic rule that silently
-  defeated a script whose logic was otherwise completely correct (#9c),
-  only discoverable by watching it fail against real, live traffic
-  multiple times in sequence.
+  "verified working" and "actually committed" (#7), a persistent
+  platform-level traffic rule that silently defeated otherwise-correct
+  logic (#9c), a classic web-framework route-ordering pitfall (#10),
+  and an honest architectural limitation surfaced only by actually
+  redeploying repeatedly and watching event history disappear each time
+  (#11) — the last two found specifically *because* this project was
+  extended to serve a second, downstream project, which is exactly the
+  kind of integration work that surfaces bugs single-project testing
+  never would.
 
 None of these were anticipated in advance. Every one was found by
 actually running the thing against real infrastructure and reading

@@ -1,15 +1,16 @@
 # Log Anomaly Detection Platform
 
-**Status: fully verified end-to-end, including the real CI/CD pipeline
-and the live canary rollout** — every job in `.github/workflows/deploy.yml`
-has actually run and passed against real infrastructure: test-gated
-CI, dual-cloud deployment, and a genuine 10%→50%→100% canary rollout
-gated on a live Application Insights query, with automatic rollback
-logic verified. Getting here took nine distinct real incidents across
-application code, CI configuration, and — the richest single incident
-in this whole three-project portfolio — four compounding bugs in the
-canary rollout itself, found one at a time against live traffic. Full
-account: [`docs/incidents.md`](docs/incidents.md).
+**Status: fully verified end-to-end, including the real CI/CD pipeline,
+the live canary rollout, and a working cross-project data feed to
+[Model Observability Dashboard](https://github.com/sugarhillconsultants/model-observability-dashboard)**
+— every job in `.github/workflows/deploy.yml` has actually run and
+passed against real infrastructure: test-gated CI, dual-cloud
+deployment, a genuine 10%→50%→100% canary rollout gated on a live
+Application Insights query, and a real `/events/recent-features`
+endpoint confirmed serving real prediction data end to end. Getting
+here took eleven distinct real incidents across application code, CI
+configuration, deployment mechanics, and integration work with a
+downstream project. Full account: [`docs/incidents.md`](docs/incidents.md).
 
 The flagship of a three-project MLOps portfolio — this is where the
 other two projects' outputs actually get used together. Full
@@ -61,18 +62,24 @@ GitHub Actions — every job passing:
   test → build-and-push → deploy-container-apps-canary
   (real 10% → 50% → 100% ramp, gated on a live App Insights query)
   → deploy-huggingface-space
+
+GET /events/recent-features (with auth), after fixing a route-order bug
+  → {"n":2,"confidence":[0.737,0.619],"text_length":[47,54],
+     "predicted_labels":["normal","security_anomaly"]}
 ```
 
 The model genuinely distinguishes anomalous from normal log lines
 (not just returning one label regardless of input), auth is genuinely
 enforced, persistence genuinely round-trips through the async
-database, and the canary rollout — the piece this project exists to
-demonstrate — genuinely ramped traffic and genuinely queried live
-telemetry to decide whether to continue.
+database (within a single deployment's lifetime — see incident #11 on
+why that caveat matters), the canary rollout genuinely ramped traffic
+and genuinely queried live telemetry to decide whether to continue,
+and the new endpoint added for Project 4 genuinely serves real
+prediction data after a real route-ordering bug was found and fixed.
 
 ## Honestly, what it took to get here
 
-Nine real incidents, documented in full in
+Eleven real incidents, documented in full in
 [`docs/incidents.md`](docs/incidents.md):
 - Two lessons carried over correctly from Project 3 (a circular
   IAM dependency, a readiness-probe/port mismatch) — built in from
@@ -103,9 +110,22 @@ Nine real incidents, documented in full in
   format mismatch that then left the app in a partially-split traffic
   state) — each found one at a time by watching the actual rollout fail
   against live traffic, not by code review.
+- A classic FastAPI route-ordering bug when adding
+  `/events/recent-features` for Project 4: a literal path defined
+  *after* a path-parameter route (`/events/{event_id}`) got silently
+  shadowed by it, since the parameter pattern matches any string.
+- An honest architectural limitation, not a bug to hide: event history
+  lives in a local SQLite file that doesn't survive a container
+  redeploy, so it reset to empty after every fix this session —
+  confirmed deliberately rather than assumed, then documented as a
+  real constraint on how much history Project 4 can ever see.
 
 ## What I'd add next
 
+- **Move off local SQLite to a persistent database** (e.g. Azure
+  Database for PostgreSQL) — incident #11 showed plainly that event
+  history currently resets on every redeploy, which caps how much
+  history Project 4's drift detection can ever see.
 - Wire up the honest gap noted in `docs/architecture.md` — prediction-
   quality signal in the canary gate, not just HTTP failure rate.
 - A GitHub Actions job that automatically bumps `MODEL_REVISION` in
