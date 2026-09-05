@@ -1,5 +1,12 @@
 # Log Anomaly Detection Platform
 
+## Related: Model Observability Dashboard
+
+This platform's live `/events/recent-features` endpoint feeds a companion
+project, [model-observability-dashboard](https://github.com/sugarhillconsultants/model-observability-dashboard) —
+PSI drift detection and automated retraining triggers, consuming this
+service's real production data rather than synthetic placeholders.
+
 **Status: fully verified end-to-end, including the real CI/CD pipeline,
 the live canary rollout, and a working cross-project data feed to
 [Model Observability Dashboard](https://github.com/sugarhillconsultants/model-observability-dashboard)**
